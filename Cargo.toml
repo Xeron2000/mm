@@ -1,0 +1,24 @@
+[package]
+name = "mm"
+version = "0.1.0"
+edition = "2021"
+description = "KISS CLI for mihomo — profiles, subscriptions, TUN, nodes"
+license = "MIT"
+repository = "https://github.com/Xeron2000/mm"
+readme = "README.md"
+keywords = ["mihomo", "clash", "proxy", "cli"]
+categories = ["command-line-utilities"]
+
+[[bin]]
+name = "mm"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+toml = "0.8"
+ureq = { version = "2", features = ["json"] }
+anyhow = "1"
+dirs = "5"
