@@ -356,42 +356,90 @@ fn cmd_profile_gen(paths: &Paths, name: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// PROXY group members in display order (1-based for users).
+fn proxy_members(api: &api::Api) -> Result<(Vec<String>, String)> {
+    let proxies = api.proxies()?;
+    let group = &proxies["proxies"]["PROXY"];
+    let now = group["now"].as_str().unwrap_or("?").to_string();
+    let all = group["all"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|n| n.as_str().map(|s| s.to_string()))
+        .collect();
+    Ok((all, now))
+}
+
+/// Resolve `3` or full node name → actual proxy name.
+fn resolve_node(members: &[String], spec: &str) -> Result<String> {
+    if let Ok(i) = spec.parse::<usize>() {
+        if i == 0 || i > members.len() {
+            bail!("index {i} out of range 1..{}", members.len());
+        }
+        return Ok(members[i - 1].clone());
+    }
+    if members.iter().any(|m| m == spec) {
+        return Ok(spec.to_string());
+    }
+    // unique prefix match (handy for long emoji names)
+    let hits: Vec<_> = members.iter().filter(|m| m.contains(spec)).collect();
+    match hits.as_slice() {
+        [one] => Ok((*one).clone()),
+        [] => bail!("no node matching '{spec}'; try: mm node list"),
+        many => bail!(
+            "ambiguous '{spec}' ({} matches); use number from: mm node list",
+            many.len()
+        ),
+    }
+}
+
 fn cmd_node_list(paths: &Paths) -> Result<()> {
     let global = load_global(paths)?;
     let api = api::Api::new(&global);
-    let proxies = api.proxies()?;
-    let group = &proxies["proxies"]["PROXY"];
-    let now = group["now"].as_str().unwrap_or("?");
-    let all = group["all"].as_array().cloned().unwrap_or_default();
-    for n in all {
-        let name = n.as_str().unwrap_or("?");
-        let mark = if name == now { "*" } else { " " };
-        println!("{mark} {name}");
+    let (all, now) = proxy_members(&api)?;
+    if all.is_empty() {
+        println!("(empty PROXY group)");
+        return Ok(());
     }
+    for (i, name) in all.iter().enumerate() {
+        let mark = if name == &now { "*" } else { " " };
+        println!("{mark} {:>2}  {name}", i + 1);
+    }
+    println!("# use: mm node use <n|name>");
     Ok(())
 }
 
-fn cmd_node_use(paths: &Paths, name: &str) -> Result<()> {
+fn cmd_node_use(paths: &Paths, spec: &str) -> Result<()> {
     let global = load_global(paths)?;
-    api::Api::new(&global).select("PROXY", name)?;
-    println!("PROXY → {name}");
+    let api = api::Api::new(&global);
+    let (all, _) = proxy_members(&api)?;
+    let name = resolve_node(&all, spec)?;
+    api.select("PROXY", &name)?;
+    // show index if found
+    let idx = all.iter().position(|m| m == &name).map(|i| i + 1);
+    if let Some(i) = idx {
+        println!("PROXY → [{i}] {name}");
+    } else {
+        println!("PROXY → {name}");
+    }
     Ok(())
 }
 
 fn cmd_node_delay(paths: &Paths, timeout: u64) -> Result<()> {
     let global = load_global(paths)?;
     let api = api::Api::new(&global);
-    let proxies = api.proxies()?;
-    let group = &proxies["proxies"]["PROXY"];
-    let all = group["all"].as_array().cloned().unwrap_or_default();
-    for n in all {
-        let name = n.as_str().unwrap_or("?");
+    let (all, now) = proxy_members(&api)?;
+    for (i, name) in all.iter().enumerate() {
         if name == "DIRECT" || name == "REJECT" {
+            let mark = if name == &now { "*" } else { " " };
+            println!("{mark} {:>2}  {:>5}     {name}", i + 1, "-");
             continue;
         }
+        let mark = if name == &now { "*" } else { " " };
         match api.delay(name, timeout) {
-            Ok(ms) => println!("{ms:>5} ms  {name}"),
-            Err(_) => println!("  err     {name}"),
+            Ok(ms) => println!("{mark} {:>2}  {ms:>5} ms  {name}", i + 1),
+            Err(_) => println!("{mark} {:>2}    err     {name}", i + 1),
         }
     }
     Ok(())

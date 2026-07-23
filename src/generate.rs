@@ -71,7 +71,8 @@ pub fn generate(paths: &Paths, global: &GlobalConfig, name: &str) -> Result<Stri
     root.insert("allow-lan".into(), true.into());
     root.insert("mode".into(), "rule".into());
     root.insert("log-level".into(), "warning".into());
-    root.insert("ipv6".into(), false.into());
+    // true: TUN can install IPv6 routes (stops OS IPv6 leaking via wlan)
+    root.insert("ipv6".into(), true.into());
     root.insert(
         "external-controller".into(),
         global.controller.clone().into(),
@@ -85,7 +86,8 @@ pub fn generate(paths: &Paths, global: &GlobalConfig, name: &str) -> Result<Stri
     tun.insert("enable".into(), intent.tun.into());
     tun.insert("stack".into(), "gvisor".into());
     tun.insert("auto-route".into(), true.into());
-    tun.insert("strict-route".into(), false.into());
+    // tighter routing → fewer bypass leaks (LAN still matches DIRECT rules)
+    tun.insert("strict-route".into(), true.into());
     tun.insert("auto-detect-interface".into(), true.into());
     tun.insert(
         "dns-hijack".into(),
@@ -94,6 +96,7 @@ pub fn generate(paths: &Paths, global: &GlobalConfig, name: &str) -> Result<Stri
     root.insert("tun".into(), serde_yaml::Value::Mapping(tun));
 
     root.insert("dns".into(), default_dns());
+    root.insert("sniffer".into(), default_sniffer());
 
     let mut profile = serde_yaml::Mapping::new();
     profile.insert("store-selected".into(), true.into());
@@ -191,6 +194,25 @@ use-hosts: true
 use-system-hosts: true
 "#;
     serde_yaml::from_str(yaml).expect("dns template")
+}
+
+/// Recover domain from TLS/HTTP for fake-ip + pure-IP destinations.
+fn default_sniffer() -> serde_yaml::Value {
+    let yaml = r#"
+enable: true
+force-dns-mapping: true
+parse-pure-ip: true
+override-destination: true
+sniff:
+  HTTP:
+    ports: [80, 8080-8880]
+    override-destination: true
+  TLS:
+    ports: [443, 8443]
+  QUIC:
+    ports: [443, 8443]
+"#;
+    serde_yaml::from_str(yaml).expect("sniffer template")
 }
 
 fn default_rules(paths: &Paths) -> Result<(Option<serde_yaml::Value>, serde_yaml::Value)> {
